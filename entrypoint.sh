@@ -16,6 +16,10 @@ if [[ ! "$(ls -A /plots)" ]]; then
 fi
 
 chia plots add -d ${plots_dir}
+for dir in `ls -d -- ${plots_dir}/*/`
+do
+  chia plots add -d $dir
+done
 
 sed -i 's/localhost/127.0.0.1/g' ~/.chia/mainnet/config/config.yaml
 
