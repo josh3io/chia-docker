@@ -5,16 +5,19 @@
 These examples shows valid setups using Chia for both docker run and docker-compose. Note that you should read some documentation at some point, but this is a good place to start.
 
 ### Docker run
-
+Simple example:
 ```bash
-docker run --name chia -d ghcr.io/chia-network/chia:latest --expose=8444 -v /path/to/plots:/plots
+docker run --name chia --expose=8444 -v /path/to/plots:/plots -d ghcr.io/chia-network/chia:latest
 ```
 Syntax
 ```bash
-docker run --name <container-name> -d ghcr.io/chia-network/chia:latest 
-optional accept incoming connections: --expose=8444
-optional: -v /path/to/plots:/plots
+docker run [--name <container-name>] [--expose=<port>] [-v </path/to/plots:/plots>] -d ghcr.io/chia-network/chia:latest
 ```
+Optional Docker parameters:
+- Give the container a name: `--name=chia`
+- Accept incoming connections: `--expose=8444`
+- Volume mount plots: `-v /path/to/plots:/plots`
+
 
 ### Docker compose
 
@@ -45,11 +48,11 @@ Timezones can be configured using the `TZ` env variable. A list of supported tim
 
 ### Add your custom keys
 
-To use your own keys pass as arguments on startup (post 1.0.2 pre 1.0.2 must manually pass as shown below)
+To use your own keys pass a file with your mnemonic as arguments on startup
 ```bash
 -v /path/to/key/file:/path/in/container -e keys="/path/in/container"
 ```
-or pass keys into the running container
+or pass keys into the running container with your mnemonic
 ```bash
 docker exec -it <container-name> venv/bin/chia keys add
 ```
@@ -63,32 +66,43 @@ or if you would like to persist the entire mainnet subdirectory and not touch th
 ```
 
 
-### Persist configuration and db
+### Persist configuration, db, and keyring
 
 You can persist whole db and configuration, simply mount it to Host.
 ```bash
--v ~/.chia:/root/.chia
+-v ~/.chia:/root/.chia \
+-v ~/.chia_keys:/root/.chia_keys
 ```
 
 ### Farmer only
 
 To start a farmer only node pass
 ```bash
--e farmer="true"
+-e service="farmer-only"
 ```
 
-### Harverster only
+### Harvester only
 
 To start a harvester only node pass
 ```bash
--e harvester="true" -e farmer_address="addres.of.farmer" -e farmer_port="portnumber" -v /path/to/ssl/ca:/path/in/container -e ca="/path/in/container" -e keys="copy"
+-e service="harvester" -e farmer_address="addres.of.farmer" -e farmer_port="portnumber" -v /path/to/ssl/ca:/path/in/container -e ca="/path/in/container" -e keys="none"
 ```
+
+### Configure full_node peer
+
+To set the full_node peer's hostname and port, set the "full_node_peer" environment variable with the format `hostname:port`
+```bash
+-e full_node_peer="node:8444"
+```
+This will configure the full_node peer hostname and port for the wallet, farmer, and timelord sections of the config.yaml file.
 
 ### Plots
 
 The `plots_dir` environment variable can be used to specify the directory containing the plots, it supports PATH-style colon-separated directories.
 
-Or, you can cimply mount `/plots` path to your host machine.
+Or, you can simply mount `/plots` path to your host machine.
+
+Set the environment variable `recursive_plot_scan` to `true` to enable the recursive plot scan configuration option.
 
 ### Log level
 To set the log level to one of CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET
@@ -96,16 +110,30 @@ To set the log level to one of CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET
 -e log_level="DEBUG"
 ```
 
-### UPnP
-To enable UPnP support (disabled by default)
+### Peer Count
+To set the peer_count and outbound_peer_count
+
+for example to set both to 20 use
 ```bash
--e upnp="true"
+-e peer_count="20"
+```
+
+```bash
+-e outbound_peer_count="20"
+```
+
+### UPnP
+To disable UPnP support (enabled by default)
+```bash
+-e upnp="false"
 ```
 
 ### Log to file
-To enable log file generation, which can be used by external tools like chiadog, etc...
+Log file can be used by external tools like chiadog, etc. Enabled by default.
+
+To disable log file generation, use
 ```bash
--e log_to_file="true"
+-e log_to_file="false"
 ```
 
 ### Docker Compose
@@ -121,24 +149,24 @@ services:
       - 8444:8444
     environment:
       # Farmer Only
-#     - farmer=true
+#     service: farmer-only
       # Harvester Only
-#     - harvester=true
-#     - farmer_address=192.168.0.10 
-#     - farmer_port=8447
-#     - ca=/path/in/container
-#     - keys=copy
+#     service: harvester
+#     farmer_address: 192.168.0.10
+#     farmer_port: 8447
+#     ca: /path/in/container
+#     keys: generate
       # Harvester Only END
       # If you would like to add keys manually via mnemonic file
-#     - keys=/path/in/container
+#     keys: /path/in/container
       # OR
       # Disable key generation on start
-#     - keys=
-      - TZ=${TZ}
+#     keys: 
+      TZ: ${TZ}
       # Enable UPnP
-#     - upnp=true
+#     upnp: true
       # Enable log file generation
-#     - log_to_file=true
+#     log_to_file: true
     volumes:
       - /path/to/plots:/plots
       - /home/user/.chia:/root/.chia
@@ -182,3 +210,37 @@ docker exec -it chia-farmer1 venv/bin/chia wallet show
 ```bash
 docker build -t chia --build-arg BRANCH=latest .
 ```
+
+## Healthchecks
+
+The Dockerfile includes a HEALTHCHECK instruction that runs one or more curl commands against the Chia RPC API. In Docker, this can be disabled using an environment variable `-e healthcheck=false` as part of the `docker run` command. Or in docker-compose you can add it to your Chia service, like so:
+
+```yaml
+version: "3.6"
+services:
+  chia:
+    ...
+    environment:
+      healthcheck: "false"
+```
+
+In Kubernetes, Docker healthchecks are disabled by default. Instead, readiness and liveness probes should be used, which can be configured in a Pod or Deployment manifest file like the following:
+
+```yaml
+livenessProbe:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - '/usr/local/bin/docker-healthcheck.sh || exit 1'
+  initialDelaySeconds: 60
+readinessProbe:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - '/usr/local/bin/docker-healthcheck.sh || exit 1'
+  initialDelaySeconds: 60
+```
+
+See [Configure Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#configure-probes) for more information about configuring readiness and liveness probes for Kubernetes clusters. The `initialDelaySeconds` parameter may need to be adjusted higher or lower depending on the speed to start up on the host the container is running on.
